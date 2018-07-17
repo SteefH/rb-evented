@@ -1,10 +1,10 @@
 # inherit_from: ../.rubocop.yml
 
-Style/Encoding:
-  Enabled: false
+# Style/Encoding:
+#   Enabled: false
 
 Metrics/LineLength:
   Max: 99
 
 AllCops:
-  TargetRubyVersion: "2.5"
+  TargetRubyVersion: "2.5.1"

@@ -6,9 +6,12 @@ require 'evented/version'
 module Evented
   # foo
   class Event
-    attr_reader :event_type, :payload
+    attr_reader :entity_class, :entity_id, :entity_version, :event_type, :payload
 
-    def initialize(event_type, **payload)
+    def initialize(entity_class, entity_id, entity_version, event_type, payload)
+      @entity_class = entity_class
+      @entity_id = entity_id
+      @entity_version = entity_version
       @event_type = event_type
       @payload = payload
     end
@@ -16,38 +19,36 @@ module Evented
 
   # Mixin for making a class event sourced
   module EventSourced
-    attr_reader :entity_id
-
     def self.included(base)
-      base.send :include, InstanceMethods
+      base.include InstanceMethods
       base.extend ClassMethods
       base.private_class_method :new
     end
 
-    module InstanceMethods
-      def emit(event_type, **payload)
-        e = Event.new(event_type, **payload)
-        send("#{self.class}_on_#{event_type}", payload)
-        # @entity_version ||= 0
-        @entity_version += 1
-        e
-      end
+    module InstanceMethods # rubocop:disable Style/Documentation
+      attr_reader :entity_id
 
-      # def entity_version
-      #   @entity_version ||= 0
-      # end
+      def emit(event_type, **payload)
+        handler = @event_handlers[event_type]
+        instance_exec(payload, &handler) if handler
+        @entity_version += 1
+        Event.new(self.class, @entity_id, @entity_version, event_type, payload)
+      end
     end
 
-    module ClassMethods
-      # instance_eval { private_class_method :new }
-
+    module ClassMethods # rubocop:disable Style/Documentation
       def on(event_type, &block)
-        define_method("#{self}_on_#{event_type}") { |payload| instance_exec(payload, &block) }
+        (@event_handlers ||= {})[event_type] = block
       end
 
-      def load(id, _load_events = nil, _load_snapshot = nil)
+      def load(id)
         i = new
-        i.instance_eval { @entity_id = id; @entity_version = 0 }
+        event_handlers = @event_handlers
+        i.instance_eval do
+          @entity_id = id
+          @entity_version = 0
+          @event_handlers = event_handlers
+        end
         i
       end
     end
