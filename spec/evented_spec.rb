@@ -58,21 +58,21 @@ end
 
 class InMemoryJournal
   def initialize
-    @events = Hash.new { |by_class,klass|
-        by_class[klass] = Hash.new { |by_id,id|
-          by_id[id] = [] 
-        } 
-    }
+    @events = Hash.new do |by_class, klass|
+      by_class[klass] = Hash.new do |by_id, id|
+        by_id[id] = []
+      end
+    end
   end
 
   def load_events(klass, id, start_version)
     @events[klass][id].each do |evt|
-      puts "LOADING #{evt.to_s}"
+      puts "LOADING #{evt}"
       yield evt if evt.entity_version >= start_version
     end
   end
 
-  def store_event(evt)
+  def store_event!(evt)
     klass = evt.entity_class
     id = evt.entity_id
     @events[klass][id] << evt

@@ -22,27 +22,32 @@ module Evented
     def self.included(base)
       base.include InstanceMethods
       base.extend ClassMethods
-      base.private_class_method :new
+      base.private_class_method :new, :create_new_entity, :load_snapshot
+      base.send(:private, :handle_event)
     end
 
     module InstanceMethods # rubocop:disable Style/Documentation
       attr_reader :entity_id, :entity_version
-      
+
+      def handle_event(handlers, event_type, event_payload)
+        handler = handlers[event_type]
+        instance_exec event_payload, &handler if handler
+        @entity_version += 1
+        Event.new(self.class, @entity_id, @entity_version, event_type, event_payload)
+      end
     end
 
     module ClassMethods # rubocop:disable Style/Documentation
-
       def on(event_type, &block)
         event_handlers[event_type] = block
       end
 
       def load(id, event_journal, snapshot_store = nil)
         entity = create_new_entity(id, event_journal)
-        entity = load_snapshot(entity, snapshot_store)
+        entity = load_snapshot(entity, snapshot_store) if snapshot_store
+        handlers = event_handlers
         event_journal.load_events(entity.class, id, entity.entity_version + 1) do |event|
-          handler = event_handlers[event.event_type]
-          entity.instance_exec event.payload, &handler
-          entity.instance_exec { @entity_version = event.entity_version }
+          entity.send(:handle_event, handlers, event.event_type, event.payload)
         end
         entity
       end
@@ -58,11 +63,8 @@ module Evented
         handlers = event_handlers
         i.instance_eval { @entity_id = id; @entity_version = 0; }
         i.define_singleton_method(:emit) do |event_type, payload = nil|
-          handler = handlers[event_type]
-          instance_exec(payload, &handler) if handler
-          @entity_version += 1
-          evt = Event.new(self.class, @entity_id, @entity_version, event_type, payload)
-          event_journal.store_event evt
+          evt = i.send(:handle_event, handlers, event_type, payload)
+          event_journal.store_event!(evt)
           evt
         end
         class << i
@@ -72,9 +74,9 @@ module Evented
       end
 
       def load_snapshot(entity, snapshot_store)
-        return entity unless (entity.respond_to? :apply_snapshot) && !snapshot_store.nil?
-        snapshot = snapshot_store.load_snapshot entity.class, entity.entity_id
-        entity.apply_snapshot snapshot
+        return entity unless entity.respond_to?(:apply_snapshot!)
+        snapshot = snapshot_store.load_snapshot(entity.class, entity.entity_id)
+        entity.apply_snapshot!(snapshot)
         entity.instance_eval { @entity_version = snapshot.version }
         entity
       end
